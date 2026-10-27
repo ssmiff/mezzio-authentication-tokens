@@ -1,0 +1,92 @@
+{
+    "name": "ssmiff/mezzio-authentication-tokens",
+    "description": "Personal access token authentication for Mezzio APIs: a mezzio-authentication adapter that checks signed JWTs against revocable tokens stored in the database.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "mezzio",
+        "laminas",
+        "authentication",
+        "api",
+        "jwt",
+        "token"
+    ],
+    "homepage": "https://github.com/ssmiff/mezzio-authentication-tokens",
+    "authors": [
+        {
+            "name": "Scott Smith",
+            "email": "scott@ssmiff.uk"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/ssmiff/mezzio-authentication-tokens/issues",
+        "source": "https://github.com/ssmiff/mezzio-authentication-tokens"
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/ssmiff/mezzio-container-helpers"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/ssmiff/mezzio-doctrine"
+        }
+    ],
+    "require": {
+        "php": "~8.5.0",
+        "doctrine/dbal": "^4.2",
+        "laminas/laminas-servicemanager": "^4.5",
+        "lcobucci/jwt": "^5.6",
+        "mezzio/mezzio-authentication": "^1.13",
+        "psr/clock": "^1.0",
+        "psr/container": "^1.1 || ^2.0",
+        "psr/http-factory": "^1.0",
+        "psr/http-message": "^1.1 || ^2.0",
+        "psr/http-server-middleware": "^1.0",
+        "ssmiff/mezzio-container-helpers": "^0.1",
+        "ssmiff/mezzio-doctrine": "^0.2",
+        "symfony/console": "^6.4 || ^7.0"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "laminas/laminas-config-aggregator": "^1.18",
+        "laminas/laminas-diactoros": "^3.8",
+        "phpunit/phpunit": "^11.5",
+        "psalm/plugin-phpunit": "^0.19.5",
+        "squizlabs/php_codesniffer": "^4.0",
+        "vimeo/psalm": "^6.13"
+    },
+    "autoload": {
+        "psr-4": {
+            "Ssmiff\\MezzioAuthenticationTokens\\": "src/",
+            "Ssmiff\\MezzioAuthenticationTokens\\Migrations\\": "migrations/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Ssmiff\\MezzioAuthenticationTokens\\Test\\": "test/"
+        }
+    },
+    "extra": {
+        "laminas": {
+            "config-provider": "Ssmiff\\MezzioAuthenticationTokens\\ConfigProvider"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "check": [
+            "@cs-check",
+            "@static-analysis",
+            "@test"
+        ],
+        "cs-check": [
+            "php-cs-fixer fix --dry-run --diff",
+            "phpcs"
+        ],
+        "cs-fix": "php-cs-fixer fix",
+        "static-analysis": "psalm --no-cache --stats",
+        "test": "phpunit --colors=always"
+    }
+}
