@@ -9,15 +9,43 @@ use Doctrine\DBAL\Schema\Index;
 use Doctrine\DBAL\Schema\PrimaryKeyConstraint;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Types;
+use InvalidArgumentException;
+
+use function preg_match;
+use function sprintf;
 
 /** The shape of the token table. The shipped migration uses it; use it in your own migration for another name. */
 final readonly class TokensTable
 {
     public const string DEFAULT_NAME = 'api_tokens';
 
-    /** @param non-empty-string $name */
+    /**
+     * Checks a table name before it is used in SQL anywhere in this module.
+     *
+     * Lowercase only, so the unquoted name in CREATE TABLE and the quoted name in queries are the same table on
+     * every platform (PostgreSQL folds unquoted names to lowercase). At most 50 characters, so the index names
+     * built from it stay within PostgreSQL's 63-character limit.
+     *
+     * @return non-empty-string
+     * @throws InvalidArgumentException
+     */
+    public static function name(string $name): string
+    {
+        if ($name === '' || preg_match('/^[a-z_][a-z0-9_]{0,49}$/D', $name) !== 1) {
+            throw new InvalidArgumentException(sprintf(
+                'Invalid token table name "%s": use a plain table name of lowercase letters, digits and underscores, '
+                . 'starting with a letter or underscore, at most 50 characters.',
+                $name,
+            ));
+        }
+
+        return $name;
+    }
+
     public static function create(string $name = self::DEFAULT_NAME): Table
     {
+        $name = self::name($name);
+
         return Table::editor()
             ->setUnquotedName($name)
             ->setColumns(

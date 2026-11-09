@@ -22,7 +22,7 @@ The JWT also carries `sub`, `abilities` and `tenant` so an SPA can read them, bu
 ```php
 'authentication_tokens' => [
     'connection'     => 'landlord',   // doctrine.connections entry holding the table; null is the default connection
-    'table'          => 'api_tokens', // the table holding the tokens; see "Another table name"
+    'table'          => 'api_tokens', // lowercase letters, digits and _, at most 50 chars; see "Another table name"
     'key'            => getenv('API_TOKENS_KEY'),   // required, at least 32 bytes; keep it out of version control
     'issuer'         => 'authentication-tokens', // iss claim; JWTs from another issuer are rejected
     'ttl'            => 2_592_000,    // default lifetime in seconds (30 days); null never expires

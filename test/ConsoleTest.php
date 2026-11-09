@@ -12,6 +12,7 @@ use Ssmiff\MezzioAuthenticationTokens\Console\RevokeCommand;
 use Ssmiff\MezzioAuthenticationTokens\TokenAuthentication;
 use Ssmiff\MezzioAuthenticationTokens\TokenUser;
 use Ssmiff\MezzioContainerHelpers\Services;
+use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 use function array_keys;
@@ -52,6 +53,17 @@ final class ConsoleTest extends TestCase
         self::assertSame(0, $revoke->execute(['id' => $id]));
         self::assertNull($auth->authenticate(new ServerRequest(headers: ['Authorization' => 'Bearer ' . $jwt])));
         self::assertSame(1, $revoke->execute(['id' => $id]));
+    }
+
+    public function testIssueRefusesATtlThatIsNotAPositiveWholeNumber(): void
+    {
+        $issue = new CommandTester(Services::get($this->container(), IssueCommand::class));
+
+        foreach (['0', '-60', '1.5', 'abc', '1e3', ' 60'] as $ttl) {
+            self::assertSame(Command::INVALID, $issue->execute(['user' => 'u1', '--ttl' => $ttl]), $ttl);
+        }
+
+        self::assertSame(Command::SUCCESS, $issue->execute(['user' => 'u1', '--ttl' => '60']));
     }
 
     public function testRevokeNeedsExactlyOneTarget(): void

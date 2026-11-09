@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Ssmiff\MezzioAuthenticationTokens;
 
 use DateInterval;
+use InvalidArgumentException;
 use Psr\Clock\ClockInterface;
 use Ssmiff\MezzioAuthenticationTokens\Jwt\JwtCodec;
 
@@ -33,9 +34,14 @@ final readonly class TokenIssuer
         ?string $tenant = null,
         ?int $ttl = null,
     ): IssuedToken {
-        $now      = $this->clock->now();
         $lifetime = $ttl ?? $this->ttl;
-        $token    = new Token(
+
+        if ($lifetime !== null && $lifetime < 1) {
+            throw new InvalidArgumentException('A token lifetime must be at least one second, or null.');
+        }
+
+        $now   = $this->clock->now();
+        $token = new Token(
             id: bin2hex(random_bytes(16)),
             userId: $userId,
             name: $name,

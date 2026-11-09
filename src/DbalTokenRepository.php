@@ -27,7 +27,7 @@ final readonly class DbalTokenRepository implements TokenRepository
 
     public function __construct(private Connection $connection, string $table = TokensTable::DEFAULT_NAME)
     {
-        $this->table = $connection->quoteSingleIdentifier($table);
+        $this->table = $connection->quoteSingleIdentifier(TokensTable::name($table));
     }
 
     #[Override]
@@ -41,10 +41,10 @@ final readonly class DbalTokenRepository implements TokenRepository
                 'name' => $token->name,
                 'abilities' => json_encode($token->abilities, JSON_THROW_ON_ERROR),
                 'tenant' => $token->tenant,
-                'created_at' => $token->createdAt,
-                'expires_at' => $token->expiresAt,
-                'last_used_at' => $token->lastUsedAt,
-                'revoked_at' => $token->revokedAt,
+                'created_at' => self::utc($token->createdAt),
+                'expires_at' => self::utc($token->expiresAt),
+                'last_used_at' => self::utc($token->lastUsedAt),
+                'revoked_at' => self::utc($token->revokedAt),
             ],
             [
                 'created_at' => Types::DATETIME_IMMUTABLE,
@@ -68,7 +68,7 @@ final readonly class DbalTokenRepository implements TokenRepository
     {
         $this->connection->update(
             $this->table,
-            ['last_used_at' => $at],
+            ['last_used_at' => self::utc($at)],
             ['id' => $id],
             ['last_used_at' => Types::DATETIME_IMMUTABLE],
         );
@@ -97,7 +97,7 @@ final readonly class DbalTokenRepository implements TokenRepository
     {
         return (int) $this->connection->executeStatement(
             'DELETE FROM ' . $this->table . ' WHERE expires_at < ? OR revoked_at < ?',
-            [$before, $before],
+            [self::utc($before), self::utc($before)],
             [Types::DATETIME_IMMUTABLE, Types::DATETIME_IMMUTABLE],
         );
     }
@@ -107,7 +107,7 @@ final readonly class DbalTokenRepository implements TokenRepository
     {
         return (int) $this->connection->executeStatement(
             'UPDATE ' . $this->table . ' SET revoked_at = ? WHERE ' . $column . ' = ? AND revoked_at IS NULL',
-            [$at, $value],
+            [self::utc($at), $value],
             [Types::DATETIME_IMMUTABLE],
         );
     }
@@ -141,6 +141,17 @@ final readonly class DbalTokenRepository implements TokenRepository
             lastUsedAt: $this->date($row['last_used_at'] ?? null),
             revokedAt: $this->date($row['revoked_at'] ?? null),
         );
+    }
+
+    /**
+     * The columns hold no timezone and are read back as UTC, so every date is written in UTC. Without this, a
+     * clock in another timezone would shift expiry and revocation by its UTC offset.
+     *
+     * @return ($at is null ? null : DateTimeImmutable)
+     */
+    private static function utc(?DateTimeImmutable $at): ?DateTimeImmutable
+    {
+        return $at?->setTimezone(new DateTimeZone('UTC'));
     }
 
     private function date(mixed $value): ?DateTimeImmutable

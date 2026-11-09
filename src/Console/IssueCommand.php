@@ -14,8 +14,8 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 use function is_array;
-use function is_numeric;
 use function is_string;
+use function preg_match;
 
 /** @psalm-suppress MixedAssignment console input is mixed until checked */
 #[AsCommand('api-tokens:issue', 'Create an API token and print its JWT once.')]
@@ -58,6 +58,12 @@ final class IssueCommand extends Command
             return Command::INVALID;
         }
 
+        if ($ttl !== null && (! is_string($ttl) || preg_match('/^[1-9][0-9]{0,9}$/D', $ttl) !== 1)) {
+            $output->writeln('<error>--ttl must be a whole number of seconds greater than zero.</error>');
+
+            return Command::INVALID;
+        }
+
         $granted = [];
 
         foreach (is_array($abilities) ? $abilities : [] as $ability) {
@@ -71,7 +77,7 @@ final class IssueCommand extends Command
             is_string($name) ? $name : 'cli',
             $granted === [] ? ['*'] : $granted,
             is_string($tenant) && $tenant !== '' ? $tenant : null,
-            is_numeric($ttl) ? (int) $ttl : null,
+            is_string($ttl) ? (int) $ttl : null,
         );
 
         $output->writeln('<info>Token ' . $issued->token->id . ' created. It will not be shown again:</info>');

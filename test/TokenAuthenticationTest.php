@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Ssmiff\MezzioAuthenticationTokens\Test;
 
 use Doctrine\DBAL\Connection;
+use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Laminas\ServiceManager\ServiceManager;
 use Override;
 use Laminas\Diactoros\ServerRequest;
@@ -12,12 +14,15 @@ use Mezzio\Authentication\UserInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Ssmiff\MezzioAuthenticationTokens\Jwt\JwtCodec;
 use Ssmiff\MezzioAuthenticationTokens\AuthServiceId;
+use Ssmiff\MezzioAuthenticationTokens\DbalTokenRepository;
+use Ssmiff\MezzioAuthenticationTokens\Test\Fixture\FrozenClock;
 use Ssmiff\MezzioAuthenticationTokens\Test\Fixture\RecordingHandler;
 use Ssmiff\MezzioAuthenticationTokens\Token;
 use Ssmiff\MezzioAuthenticationTokens\TokenAuthentication;
 use Ssmiff\MezzioAuthenticationTokens\TokenIssuer;
 use Ssmiff\MezzioAuthenticationTokens\TokenRepository;
 use Ssmiff\MezzioAuthenticationTokens\TokenUser;
+use Ssmiff\MezzioAuthenticationTokens\TokensTable;
 use Ssmiff\MezzioContainerHelpers\Services;
 use Psr\Http\Server\MiddlewareInterface;
 
@@ -26,6 +31,7 @@ use function explode;
 use function json_decode;
 use function str_repeat;
 use function substr;
+use function var_export;
 
 final class TokenAuthenticationTest extends TestCase
 {
@@ -260,10 +266,127 @@ final class TokenAuthenticationTest extends TestCase
         );
     }
 
-    public function testATableNameThatIsNotAPlainIdentifierIsRefused(): void
+    /** @return iterable<string, array{string}> */
+    public static function invalidTableNames(): iterable
     {
-        $this->expectExceptionMessage('plain table name');
+        yield 'SQL'              => ['tokens; DROP TABLE x'];
+        yield 'quote'            => ['to"kens'];
+        yield 'trailing newline' => ["api_tokens\n"];
+        yield 'schema-qualified' => ['public.api_tokens'];
+        yield 'uppercase'        => ['MyTokens'];
+        yield 'leading digit'    => ['1tokens'];
+        yield 'empty'            => [''];
+        yield 'over 50 chars'    => [str_repeat('a', 51)];
+    }
 
-        Services::get($this->container(['table' => 'tokens; DROP TABLE x']), TokenIssuer::class);
+    #[DataProvider('invalidTableNames')]
+    public function testAnInvalidTableNameFromConfigIsRefused(string $table): void
+    {
+        // The container wraps the factory's InvalidArgumentException, so match the message.
+        $this->expectExceptionMessage('Invalid token table name');
+
+        Services::get($this->container(['table' => $table]), TokenIssuer::class);
+    }
+
+    #[DataProvider('invalidTableNames')]
+    public function testTheRepositoryAndTheSchemaRefuseAnInvalidTableNameThemselves(string $table): void
+    {
+        $connection = Services::get($this->container(), Connection::class, AuthServiceId::CONNECTION);
+
+        try {
+            new DbalTokenRepository($connection, $table);
+            self::fail('The repository accepted ' . var_export($table, true));
+        } catch (InvalidArgumentException) {
+        }
+
+        $this->expectException(InvalidArgumentException::class);
+        TokensTable::create($table);
+    }
+
+    public function testTheLongestAllowedTableNameWorks(): void
+    {
+        $table     = str_repeat('a', 50);
+        $container = $this->container(['table' => $table]);
+        $issued    = Services::get($container, TokenIssuer::class)->issue('u', 'spa');
+
+        self::assertInstanceOf(
+            TokenUser::class,
+            Services::get($container, TokenAuthentication::class)->authenticate(self::bearer($issued->jwt)),
+        );
+    }
+
+    public function testExpiryIsStoredInUtcWhateverTheClocksTimezone(): void
+    {
+        // A clock five hours ahead of UTC: before the fix, its local times were stored as if they were UTC, so
+        // tokens lived five hours longer than their ttl.
+        $this->clock = new FrozenClock('+05:00');
+        $container   = $this->container();
+        $issued      = Services::get($container, TokenIssuer::class)->issue('u', 'spa', ttl: 3600);
+        $connection  = Services::get($container, Connection::class, AuthServiceId::CONNECTION);
+        $auth        = Services::get($container, TokenAuthentication::class);
+
+        self::assertSame(
+            '2026-10-27 13:00:00',
+            $connection->fetchOne('SELECT expires_at FROM api_tokens WHERE id = ?', [$issued->token->id]),
+        );
+
+        $this->clock->advance('PT59M');
+        self::assertInstanceOf(TokenUser::class, $auth->authenticate(self::bearer($issued->jwt)));
+
+        $this->clock->advance('PT2M');
+        self::assertNull($auth->authenticate(self::bearer($issued->jwt)));
+    }
+
+    public function testRevocationIsStoredInUtcWhateverTheClocksTimezone(): void
+    {
+        $this->clock = new FrozenClock('-08:00');
+        $container   = $this->container();
+        $issuer      = Services::get($container, TokenIssuer::class);
+        $issued      = $issuer->issue('u', 'spa');
+        $connection  = Services::get($container, Connection::class, AuthServiceId::CONNECTION);
+
+        $issuer->revoke($issued->token->id);
+
+        self::assertSame(
+            '2026-10-27 12:00:00',
+            $connection->fetchOne('SELECT revoked_at FROM api_tokens WHERE id = ?', [$issued->token->id]),
+        );
+    }
+
+    /** @return iterable<string, array{array<string, mixed>, string}> */
+    public static function invalidNumbers(): iterable
+    {
+        yield 'zero ttl'                => [['ttl' => 0], 'authentication_tokens.ttl'];
+        yield 'negative ttl'            => [['ttl' => -60], 'authentication_tokens.ttl'];
+        yield 'negative touch interval' => [['touch_interval' => -1], 'authentication_tokens.touch_interval'];
+    }
+
+    /** @param array<string, mixed> $config */
+    #[DataProvider('invalidNumbers')]
+    public function testInvalidLifetimesInConfigAreRefused(array $config, string $key): void
+    {
+        $this->expectExceptionMessage($key);
+
+        $container = $this->container($config);
+        Services::get($container, TokenIssuer::class);
+        Services::get($container, TokenAuthentication::class);
+    }
+
+    public function testATouchIntervalOfZeroUpdatesLastUsedOnEveryRequest(): void
+    {
+        $container = $this->container(['touch_interval' => 0]);
+        $issued    = Services::get($container, TokenIssuer::class)->issue('u', 'spa');
+
+        self::assertInstanceOf(
+            TokenUser::class,
+            Services::get($container, TokenAuthentication::class)->authenticate(self::bearer($issued->jwt)),
+        );
+    }
+
+    public function testTheIssuerRefusesALifetimeBelowOneSecond(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        $this->issuer->issue('u', 'spa', ttl: 0);
     }
 }

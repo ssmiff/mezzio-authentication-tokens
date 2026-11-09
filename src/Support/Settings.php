@@ -11,7 +11,6 @@ use Ssmiff\MezzioAuthenticationTokens\TokensTable;
 use function is_array;
 use function is_int;
 use function is_string;
-use function preg_match;
 use function sprintf;
 use function strlen;
 
@@ -61,27 +60,31 @@ final readonly class Settings
     /** @return non-empty-string */
     public function table(): string
     {
-        $table = $this->string('table');
-
-        if ($table === null) {
-            return TokensTable::DEFAULT_NAME;
-        }
-
-        if ($table === '' || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $table) !== 1) {
-            throw self::invalid('table', 'a plain table name');
-        }
-
-        return $table;
+        return TokensTable::name($this->string('table') ?? TokensTable::DEFAULT_NAME);
     }
 
+    /** @return positive-int|null */
     public function ttl(): ?int
     {
-        return $this->int('ttl');
+        $ttl = $this->int('ttl');
+
+        if ($ttl !== null && $ttl < 1) {
+            throw self::invalid('ttl', 'a positive number of seconds, or null for tokens that never expire');
+        }
+
+        return $ttl;
     }
 
+    /** @return int<0, max> */
     public function touchInterval(): int
     {
-        return $this->int('touch_interval') ?? 60;
+        $interval = $this->int('touch_interval') ?? 60;
+
+        if ($interval < 0) {
+            throw self::invalid('touch_interval', 'zero or a positive number of seconds');
+        }
+
+        return $interval;
     }
 
     private function string(string $key): ?string
