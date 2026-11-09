@@ -95,27 +95,42 @@ vendor/bin/laminas api-tokens:prune --days=30      # delete tokens that ended mo
 
 ## Tenants
 
-`tenant` is an opaque string; this module does not depend on a tenancy package. To make a tenant-bound token select the tenant, add a resolver that reads `TokenUser::tenant()` and list it before the others. With [ssmiff/mezzio-tenancy](https://github.com/ssmiff/mezzio-tenancy):
+`tenant` is an opaque string; this module does not depend on a tenancy package.
+
+On an authenticated request, take the tenant from the token and from nowhere else. A resolver that only *adds*
+the token's tenant ahead of a header or subdomain resolver is not enough: a token issued without a tenant makes it
+abstain, the next resolver runs, and the client picks any tenant it likes with a header. With
+[ssmiff/mezzio-tenancy](https://github.com/ssmiff/mezzio-tenancy), use one resolver that decides alone for
+authenticated requests and falls back to the header and subdomain only for anonymous ones:
 
 ```php
 final readonly class TokenTenantResolver implements TenantResolver
 {
+    public function __construct(private HeaderResolver $header, private SubdomainResolver $subdomain) {}
+
     public function identify(ServerRequestInterface $request): ?string
     {
         $user = $request->getAttribute(UserInterface::class);
 
-        return $user instanceof TokenUser ? $user->tenant() : null;
+        if ($user !== null) {
+            return $user instanceof TokenUser ? $user->tenant() : null; // no tenant: the tenancy middleware 404s
+        }
+
+        return $this->header->identify($request) ?? $this->subdomain->identify($request);
     }
 }
 ```
 
-Config lists are appended when merged, not replaced, so a resolver added in your own config would run after the module's defaults, and a header could then override the token. Replace the list with `Laminas\Stdlib\ArrayUtils\MergeReplaceKey`:
+Make it the **only** resolver. Config lists are appended when merged, so replace the module's defaults with
+`Laminas\Stdlib\ArrayUtils\MergeReplaceKey`:
 
 ```php
-'tenancy' => ['resolvers' => new MergeReplaceKey([TokenTenantResolver::class, HeaderResolver::class])],
+'tenancy'      => ['resolvers' => new MergeReplaceKey([TokenTenantResolver::class])],
+'dependencies' => ['factories' => [TokenTenantResolver::class => AttributeFactory::class]],
 ```
 
-Put the token middleware before the tenancy middleware on the route.
+Put the token middleware before the tenancy middleware on the route. A token meant to work across tenants is
+then not possible by accident; if you need one, give it an ability and check that ability in the resolver.
 
 ## Adding another mechanism later
 
